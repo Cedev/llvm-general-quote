@@ -37,6 +37,7 @@ import Language.Haskell.TH.Quote (QuasiQuoter(..))
 
 import qualified LLVM.General.Quote.Parser as P
 import qualified LLVM.General.Quote.AST as A
+import qualified LLVM.General.Quote.Sliced as Sliced
 import LLVM.General.Quote.SSA
 import qualified LLVM.General.AST.IntegerPredicate as LI
 import qualified LLVM.General.AST as L
@@ -235,12 +236,14 @@ instance QQExp A.Instruction L.Instruction where
                     case x1' :: Either L.Instruction L.Terminator of
                       Left  x1'' -> return x1''
                       Right x1'' -> fail $ show x1'' ++ " is no Instruction"||]
-instance QQExp [A.LabeledInstruction] [L.BasicBlock] where
+instance QQExp [A.LabeledInstruction] Sliced.Sliced where
   qqExpM = qqLabeledInstructionListE
-instance QQExp A.NamedInstruction [L.BasicBlock] where
-  qqExpM = qqNamedInstructionE
-instance QQExp A.LabeledInstruction [L.BasicBlock] where
+instance QQExp A.LabeledInstruction Sliced.Sliced where
   qqExpM = qqLabeledInstructionE
+instance QQExp [A.NamedInstruction] Sliced.Sliced where
+  qqExpM = qqNamedInstructionListE
+instance QQExp A.NamedInstruction Sliced.Sliced where
+  qqExpM = qqNamedInstructionE
 instance QQExp A.MetadataNodeID L.MetadataNodeID where
   qqExpM = qqMetadataNodeIDE
 instance QQExp A.MetadataNode L.MetadataNode where
@@ -297,7 +300,8 @@ qqGlobalE (A.GlobalAlias x1 x2 x3 x4 x5) =
 qqGlobalE (A.Function x1 x2 x3 x4 x5 x6 x7 x8 x9 xA xB xC) =
   [||L.Function <$> $$(qqExpM x1) <*> $$(qqExpM x2) <*> $$(qqExpM x3) <*> $$(qqExpM x4)
                 <*> $$(qqExpM x5) <*> $$(qqExpM x6) <*> $$(qqExpM x7) <*> $$(qqExpM x8)
-                <*> $$(qqExpM x9) <*> $$(qqExpM xA) <*> $$(qqExpM xB) <*> toSSA `fmap` $$(qqExpM xC)||]
+                <*> $$(qqExpM x9) <*> $$(qqExpM xA) <*> $$(qqExpM xB)
+                <*> fmap (toSSA . Sliced.entireBlocks) $$(qqExpM xC)||]
 
 qqParameterListE :: Conversion [A.Parameter] [L.Parameter]
 qqParameterListE [] = [||pure []||]
@@ -463,72 +467,21 @@ qqInstructionE (A.Resume x1 x2) =
 qqInstructionE (A.Unreachable x1) =
   [||Right <$> (L.Unreachable <$> $$(qqExpM x1))||]
 
-qqLabeledInstructionListE :: Conversion [A.LabeledInstruction] [L.BasicBlock]
+qqLabeledInstructionListE :: Conversion [A.LabeledInstruction] Sliced.Sliced
 qqLabeledInstructionListE [] =
-  [||pure []||]
+  [||pure mempty||]
 qqLabeledInstructionListE (x:xs) =
-  [||let nextLabel :: L.Name
-         nextLabel = L.Name "nextblock"
+  [|| (<>) <$> $$(qqExpM x) <*> $$(qqExpM xs) ||]
 
-         jumpNext :: L.BasicBlock -> Bool
-         jumpNext (L.BasicBlock _ _ t) =
-           case t of
-             _ L.:= L.Br l2 _ | l2 == nextLabel -> True
-             L.Do (L.Br l2 _) | l2 == nextLabel -> True
-             _                                   -> False
-
-         replacePhiFroms :: [(L.Name,L.Name)] -> L.BasicBlock -> L.BasicBlock
-         replacePhiFroms labels (L.BasicBlock n is t) =
-           L.BasicBlock n (map (replacePhiFrom labels) is) t
-
-         replacePhiFrom :: [(L.Name,L.Name)] -> L.Named L.Instruction -> L.Named L.Instruction
-         replacePhiFrom names (n L.:= phi@L.Phi{}) =
-           n L.:= replacePhiFrom' names phi
-         replacePhiFrom names (L.Do phi@L.Phi{}) =
-           L.Do $ replacePhiFrom' names phi
-         replacePhiFrom _ named = named
-         
-         replacePhiFrom' :: [(L.Name,L.Name)] -> L.Instruction -> L.Instruction
-         replacePhiFrom' names phi@L.Phi{} =
-           phi{ L.incomingValues =
-                   [ (op,n') | (op,n) <- L.incomingValues phi,
-                               let n' = maybe n id (lookup n names)] }
-         replacePhiFrom' _ _ =
-           error "this should never happen"
-
-         fuse :: L.BasicBlock -> L.BasicBlock -> Writer [(L.Name,L.Name)] L.BasicBlock
-         fuse (L.BasicBlock n1 i1 _t1) (L.BasicBlock n2 i2 t2) = do
-           tell [(n2,n1)]
-           return $ L.BasicBlock n1 (i1++i2) t2
-         
-         fuseBlocks' :: [L.BasicBlock] -> Writer [(L.Name,L.Name)] [L.BasicBlock]
-         fuseBlocks' bbs@[] = return bbs
-         fuseBlocks' bbs@[_] = return bbs
-         fuseBlocks' (bb1:bbs@(bb2:bbs')) =
-           case jumpNext bb1 of
-             True  -> do
-               fused <- fuse bb1 bb2
-               fuseBlocks' (fused:bbs')
-             False -> do
-               bbs_ <- fuseBlocks' bbs
-               return $ bb1 : bbs_
-
-         fuseBlocks :: [L.BasicBlock] -> [L.BasicBlock]
-         fuseBlocks bbs =
-           let (bbs',labels) = runWriter $ fuseBlocks' bbs
-           in map (replacePhiFroms labels) bbs'
-
-     in fuseBlocks <$> ((++) <$> $$(qqExpM x) <*> $$(qqExpM xs))||]
-
-qqLabeledInstructionE :: forall m. Conversion' m A.LabeledInstruction [L.BasicBlock]
-qqLabeledInstructionE (A.Labeled label instr) =
+qqLabeledInstructionE :: forall m. Conversion' m A.LabeledInstruction Sliced.Sliced
+qqLabeledInstructionE (A.Labeled label instrs) =
   [||do label' <- $$(qqExpM label)
-        L.BasicBlock _ is t:bbs <- $$(qqExpM instr)
-        return $ L.BasicBlock label' is t:bbs||]
+        sliced <- $$(qqExpM instrs)
+        return $ Sliced.label label' <> sliced||]
 qqLabeledInstructionE (A.ForLoop label iterType iterName direction from to step body) =
   [||do
     label' <- $$(qqExpM label)
-    body' <- $$(qqExpM body :: TExpQ (m [L.BasicBlock]))
+    body' <- $$(qqExpM body :: TExpQ (m Sliced.Sliced))
     iterName' <- $$(qqExpM iterName :: TExpQ (m L.Name))
     iterType' <- $$(qqExpM iterType :: TExpQ (m L.Type))
     from' <- $$(qqExpM from :: TExpQ (m L.Operand))
@@ -541,6 +494,7 @@ qqLabeledInstructionE (A.ForLoop label iterType iterName direction from to step 
         cond = L.Name (labelString ++ ".cond")
         labelHead = L.Name (labelString ++ ".head")
         labelEnd = L.Name (labelString ++ ".end")
+        labelFirst = L.Name (labelString ++ ".first")
         labelLast = L.Name (labelString ++ ".last")
 
         iter = L.LocalReference iterType' iterName'
@@ -552,19 +506,14 @@ qqLabeledInstructionE (A.ForLoop label iterType iterName direction from to step 
               [ cond L.:= L.ICmp LI.SLT iter to' [] ]
             A.Down ->
               [ cond L.:= L.ICmp LI.SGT iter to' [] ]
-        branchTo l = case body'' of
-          [] -> error "empty body of for-loop"
-          (L.BasicBlock bodyLabel _ _:_) -> L.Do (L.CondBr (L.LocalReference (L.IntegerType 1) cond) bodyLabel l [])
-        retTerm = L.Do (L.Br (L.Name "nextblock") [])
+        branchTo l = L.Do (L.CondBr (L.LocalReference (L.IntegerType 1) cond) labelFirst l [])
         true = L.ConstantOperand $ L.Int 1 1
         initIter = iterName' L.:= L.Select true from' from' []
 
-        (pre,post) =
-                ([L.BasicBlock label' [initIter] (L.Do (L.Br labelHead [])), L.BasicBlock labelHead preInstrs (branchTo labelEnd)]
-                ,[L.BasicBlock labelEnd [] retTerm])
-        body'' = body' ++ [L.BasicBlock labelLast newIterInstr (L.Do (L.Br labelHead []))]
+        pre = [L.BasicBlock label' [initIter] (L.Do (L.Br labelHead [])), L.BasicBlock labelHead preInstrs (branchTo labelEnd)]
+        body'' = Sliced.label labelFirst <> body' <> Sliced.block (L.BasicBlock labelLast newIterInstr (L.Do (L.Br labelHead [])))
 
-    return (pre ++ body'' ++ post)
+    return (Sliced.blocks pre <> body'' <> Sliced.label labelEnd)
   ||]
 qqLabeledInstructionE (A.ITE label cond then_body else_body) =
   [||do
@@ -582,14 +531,12 @@ qqLabeledInstructionE (A.ITE label cond then_body else_body) =
         endLabel = L.Name (labelString ++ ".end")
         headLabel = L.Name (labelString ++ ".head")
 
-        brEnd l = [L.BasicBlock l [] (L.Do (L.Br endLabel []))]
+        brEnd l = L.BasicBlock l [] (L.Do (L.Br endLabel []))
         pre = [L.BasicBlock label' [] (L.Do (L.Br headLabel []))
               ,L.BasicBlock headLabel [] (L.Do (L.CondBr cond' thenLabel elseLabel []))]
-        brNext l = [L.BasicBlock l [] (L.Do (L.Br (L.Name "nextblock") []))]
-        end = brNext endLabel
-        then_body'' = brNext thenLabel ++ then_body' ++ brEnd thenLastLabel
-        else_body'' = brNext elseLabel ++ else_body' ++ brEnd elseLastLabel
-    return (pre ++ then_body'' ++ else_body'' ++ end)
+        then_body'' = Sliced.label thenLabel <> then_body' <> Sliced.block (brEnd thenLastLabel)
+        else_body'' = Sliced.label elseLabel <> else_body' <> Sliced.block (brEnd elseLastLabel)
+    return (Sliced.blocks pre <> then_body'' <> else_body'' <> Sliced.label endLabel)
   ||]
 qqLabeledInstructionE (A.While label cond body) =
   [||do
@@ -606,33 +553,35 @@ qqLabeledInstructionE (A.While label cond body) =
 
         pre = [L.BasicBlock label' [] (L.Do (L.Br headLabel []))
               ,L.BasicBlock headLabel [] (L.Do (L.CondBr cond' bodyLabel endLabel []))]
-        brNext l = [L.BasicBlock l [] (L.Do (L.Br (L.Name "nextblock") []))]
-        end = brNext endLabel
-        brTop = [L.BasicBlock bodyLastLabel [] (L.Do (L.Br headLabel []))]
-        body'' = brNext bodyLabel ++ body' ++ brTop
-    return (pre ++ body'' ++ end)
+        brTop = L.BasicBlock bodyLastLabel [] (L.Do (L.Br headLabel []))
+        body'' = Sliced.label bodyLabel <> body' <> Sliced.block brTop
+    return (Sliced.blocks pre <> body'' <> Sliced.label endLabel)
   ||]
 
-qqNamedInstructionE :: Conversion A.NamedInstruction [L.BasicBlock]
+qqNamedInstructionListE :: Conversion [A.NamedInstruction] Sliced.Sliced
+qqNamedInstructionListE [] =
+  [||pure mempty||]
+qqNamedInstructionListE (x:xs) =
+  [|| (<>) <$> $$(qqExpM x) <*> $$(qqExpM xs) ||]
+  
+qqNamedInstructionE :: Conversion A.NamedInstruction Sliced.Sliced
 qqNamedInstructionE (x1 A.:= x2) =
   [||do x1' <- $$(qqExpM x1)
         x2' <- $$(qqExpM x2)
-        n <- newVariable
         case x2' of
-          Left ins -> return [L.BasicBlock n [x1' L.:= ins] (L.Do $ L.Br (L.Name "nextblock") [])]
-          Right term -> return [L.BasicBlock n [] (x1' L.:= term)]||]
+          Left  ins  -> return . Sliced.instr $ x1' L.:= ins
+          Right term -> return . Sliced.term  $ x1' L.:= term||]
 qqNamedInstructionE (A.Do x2) =
   [||do x2' <- $$(qqExpM x2)
-        n <- newVariable
         case x2' of
-          Left ins -> return [L.BasicBlock n [L.Do ins] (L.Do $ L.Br (L.Name "nextblock") [])]
-          Right term -> return [L.BasicBlock n [] (L.Do term)]||]
-qqNamedInstructionE (A.AntiInstructionList s) =
-  unsafeTExpCoerce $ antiVarE s
+          Left  ins  -> return . Sliced.instr $ L.Do ins
+          Right term -> return . Sliced.term  $ L.Do term||]
+qqNamedInstructionE (A.AntiInstructionList s)
+  = [|| Sliced.instrs <$> $$(unsafeTExpCoerce $ antiVarE s)||]
 qqNamedInstructionE (A.AntiBasicBlock v)
-  = [||(:[]) <$> $$(unsafeTExpCoerce $ antiVarE v)||]
+  = [|| Sliced.block <$>  $$(unsafeTExpCoerce $ antiVarE v)||]
 qqNamedInstructionE (A.AntiBasicBlockList v)
-  = unsafeTExpCoerce $ [|toBasicBlockList $(antiVarE v)|]
+  = [|| Sliced.blocks <$> $$(unsafeTExpCoerce $ [|toBasicBlockList $(antiVarE v)|])||]
 
 qqMetadataNodeIDE :: Conversion A.MetadataNodeID L.MetadataNodeID
 qqMetadataNodeIDE (A.MetadataNodeID x1) =

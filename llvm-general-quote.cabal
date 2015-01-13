@@ -30,6 +30,7 @@ library
     LLVM.General.Quote.Parser,
     LLVM.General.Quote.AST,
     LLVM.General.Quote.Base,
+    LLVM.General.Quote.Sliced,
     LLVM.General.Quote.SSA
   other-extensions:    CPP
   ghc-options:     -Wall

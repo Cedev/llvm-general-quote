@@ -710,12 +710,12 @@ instruction_ :
                                             { A.Invoke $2 (rev $3) ($4 (map fst (rev $6))) (map snd (rev $6)) (rev $8) $11 $14 }
   | 'resume' tOperand                       { A.Resume $2 }
   | 'unreachable'                           { A.Unreachable }
-  | ANTI_INSTR                              {\[] -> A.AntiInstruction $1 }
 
 instruction :: { A.Instruction }
 instruction :
     instruction_ instructionMetadata   { $1 (rev $2) }
   | tOperand                           { A.OperandInstruction $1 }
+  | ANTI_INSTR                         { A.AntiInstruction $1 }
 
 name :: { A.Name }
 name :
@@ -732,7 +732,12 @@ namedI :
   | ANTI_BBS
       { A.AntiBasicBlockList $1 }
   | ANTI_INSTRS                     { A.AntiInstructionList $1 }
-
+  
+namedIs :: { RevList (A.NamedInstruction) }
+namedIs :
+    {- empty -}                     { RNil }
+  | namedIs namedI                  { RCons $2 $1 }
+  
 elseInstrs :: { [A.LabeledInstruction] }
 elseInstrs :
     {- empty -}         { [] }
@@ -741,7 +746,7 @@ elseInstrs :
 
 labeledI :: { A.LabeledInstruction }
 labeledI :
-    jumpLabel namedI                { A.Labeled $1 $2 }
+    jumpLabel namedIs               { A.Labeled $1 (rev $2) }
   | jumpLabel 'for' type name 'in' operand direction operand mStep '{' instructions '}'
       { A.ForLoop $1 $3 $4 $7 ($6 $3) ($8 $3) ($9 $3) (rev $11) }
   | jumpLabel 'if' operand '{' instructions '}' elseInstrs
