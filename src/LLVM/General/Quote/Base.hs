@@ -494,8 +494,8 @@ qqLabeledInstructionE (A.ForLoop label iterType iterName direction from to step 
         cond = L.Name (labelString ++ ".cond")
         labelHead = L.Name (labelString ++ ".head")
         labelEnd = L.Name (labelString ++ ".end")
-        labelFirst = L.Name (labelString ++ ".first")
-        labelLast = L.Name (labelString ++ ".last")
+        
+        (labelFirst, labeledBody) = Sliced.labelUnlabeled (L.Name (labelString ++ ".first")) body'
 
         iter = L.LocalReference iterType' iterName'
         newIterInstr = case direction of
@@ -506,14 +506,15 @@ qqLabeledInstructionE (A.ForLoop label iterType iterName direction from to step 
               [ cond L.:= L.ICmp LI.SLT iter to' [] ]
             A.Down ->
               [ cond L.:= L.ICmp LI.SGT iter to' [] ]
-        branchTo l = L.Do (L.CondBr (L.LocalReference (L.IntegerType 1) cond) labelFirst l [])
+    
+        branchTo = L.Do (L.CondBr (L.LocalReference (L.IntegerType 1) cond) labelFirst labelEnd [])
         true = L.ConstantOperand $ L.Int 1 1
         initIter = iterName' L.:= L.Select true from' from' []
 
-        pre = [L.BasicBlock label' [initIter] (L.Do (L.Br labelHead [])), L.BasicBlock labelHead preInstrs (branchTo labelEnd)]
-        body'' = Sliced.label labelFirst <> body' <> Sliced.block (L.BasicBlock labelLast newIterInstr (L.Do (L.Br labelHead [])))
+        pre = Sliced.instr initIter <> Sliced.block (L.BasicBlock labelHead preInstrs branchTo)
+        body'' = labeledBody <> Sliced.instrs newIterInstr <> Sliced.term (L.Do (L.Br labelHead []))
 
-    return (Sliced.blocks pre <> body'' <> Sliced.label labelEnd)
+    return (pre <> body'' <> Sliced.label labelEnd)
   ||]
 qqLabeledInstructionE (A.ITE label cond then_body else_body) =
   [||do
