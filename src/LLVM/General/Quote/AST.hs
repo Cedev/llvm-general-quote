@@ -496,7 +496,7 @@ data Instruction
 data LabeledInstruction
   = Labeled {
     label :: Name,
-    instruction :: [NamedInstruction] }
+    instruction :: NamedInstruction }
   | ForLoop {
     label :: Name,
     iterType :: Type,
@@ -528,7 +528,7 @@ data NamedInstruction
   | AntiBasicBlock String
   | AntiBasicBlockList String
   deriving (Eq, Read, Show, Typeable, Data)
-  
+
 -- | A 'MetadataNodeID' is a number for identifying a metadata node.
 -- Note this is different from "named metadata", which are represented with
 -- 'LLVM.General.AST.NamedMetadataDefinition'.

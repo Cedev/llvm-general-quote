@@ -732,12 +732,7 @@ namedI :
   | ANTI_BBS
       { A.AntiBasicBlockList $1 }
   | ANTI_INSTRS                     { A.AntiInstructionList $1 }
-  
-namedIs :: { RevList (A.NamedInstruction) }
-namedIs :
-    {- empty -}                     { RNil }
-  | namedIs namedI                  { RCons $2 $1 }
-  
+
 elseInstrs :: { [A.LabeledInstruction] }
 elseInstrs :
     {- empty -}         { [] }
@@ -746,7 +741,7 @@ elseInstrs :
 
 labeledI :: { A.LabeledInstruction }
 labeledI :
-    jumpLabel namedIs               { A.Labeled $1 (rev $2) }
+    jumpLabel namedI                { A.Labeled $1 $2 }
   | jumpLabel 'for' type name 'in' operand direction operand mStep '{' instructions '}'
       { A.ForLoop $1 $3 $4 $7 ($6 $3) ($8 $3) ($9 $3) (rev $11) }
   | jumpLabel 'if' operand '{' instructions '}' elseInstrs
