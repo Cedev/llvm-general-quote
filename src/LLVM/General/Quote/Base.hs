@@ -525,19 +525,16 @@ qqLabeledInstructionE (A.ITE label cond then_body else_body) =
     let labelString = case label' of
           L.Name n -> n
           L.UnName n -> show n
-        thenLabel = L.Name (labelString ++ ".then")
-        thenLastLabel = L.Name (labelString ++ ".then.last")
-        elseLabel = L.Name (labelString ++ ".else")
-        elseLastLabel = L.Name (labelString ++ ".else.last")
         endLabel = L.Name (labelString ++ ".end")
-        headLabel = L.Name (labelString ++ ".head")
+        
+        (thenLabel, labeledThen) = Sliced.labelUnlabeled (L.Name (labelString ++ ".then")) then_body'
+        (elseLabel, labeledElse) = Sliced.labelUnlabeled (L.Name (labelString ++ ".else")) else_body'
 
-        brEnd l = L.BasicBlock l [] (L.Do (L.Br endLabel []))
-        pre = [L.BasicBlock label' [] (L.Do (L.Br headLabel []))
-              ,L.BasicBlock headLabel [] (L.Do (L.CondBr cond' thenLabel elseLabel []))]
-        then_body'' = Sliced.label thenLabel <> then_body' <> Sliced.block (brEnd thenLastLabel)
-        else_body'' = Sliced.label elseLabel <> else_body' <> Sliced.block (brEnd elseLastLabel)
-    return (Sliced.blocks pre <> then_body'' <> else_body'' <> Sliced.label endLabel)
+        brEnd = Sliced.term (L.Do (L.Br endLabel []))
+        pre = Sliced.term (L.Do (L.CondBr cond' thenLabel elseLabel []))
+        then_body'' = labeledThen <> brEnd
+        else_body'' = labeledElse <> brEnd
+    return (pre <> then_body'' <> else_body'' <> Sliced.label endLabel)
   ||]
 qqLabeledInstructionE (A.While label cond body) =
   [||do
@@ -547,16 +544,15 @@ qqLabeledInstructionE (A.While label cond body) =
     let labelString = case label' of
           L.Name n -> n
           L.UnName n -> show n
-        bodyLabel = L.Name (labelString ++ ".body")
-        bodyLastLabel = L.Name (labelString ++ ".body.last")
         endLabel = L.Name (labelString ++ ".end")
         headLabel = L.Name (labelString ++ ".head")
+        
+        (bodyLabel, labeledBody) = Sliced.labelUnlabeled (L.Name (labelString ++ ".body")) body'
 
-        pre = [L.BasicBlock label' [] (L.Do (L.Br headLabel []))
-              ,L.BasicBlock headLabel [] (L.Do (L.CondBr cond' bodyLabel endLabel []))]
-        brTop = L.BasicBlock bodyLastLabel [] (L.Do (L.Br headLabel []))
-        body'' = Sliced.label bodyLabel <> body' <> Sliced.block brTop
-    return (Sliced.blocks pre <> body'' <> Sliced.label endLabel)
+        pre = L.BasicBlock headLabel [] (L.Do (L.CondBr cond' bodyLabel endLabel []))
+        brTop = Sliced.term (L.Do (L.Br headLabel []))
+        body'' = labeledBody <> brTop
+    return (Sliced.block pre <> body'' <> Sliced.label endLabel)
   ||]
 
 qqNamedInstructionListE :: Conversion [A.NamedInstruction] Sliced.Sliced
