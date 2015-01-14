@@ -475,9 +475,11 @@ qqLabeledInstructionListE (x:xs) =
 
 qqLabeledInstructionE :: forall m. Conversion' m A.LabeledInstruction Sliced.Sliced
 qqLabeledInstructionE (A.Labeled label instrs) =
-  [||do label' <- $$(qqExpM label)
+  [||do slicedLabel <- case label of 
+                            A.NeedsName -> return mempty
+                            _           -> Sliced.label <$> $$(qqExpM label)
         sliced <- $$(qqExpM instrs)
-        return $ Sliced.label label' <> sliced||]
+        return $ slicedLabel <> sliced||]
 qqLabeledInstructionE (A.ForLoop label iterType iterName direction from to step body) =
   [||do
     label' <- $$(qqExpM label)
