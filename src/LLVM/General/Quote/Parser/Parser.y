@@ -280,6 +280,8 @@ import qualified LLVM.General.AST.DataLayout as A
 %name parseGlobal       global
 %name parseInstruction  instruction
 
+%left PREC_SECOND
+%left PREC_FIRST
 %%
 
 {------------------------------------------------------------------------------
@@ -568,7 +570,9 @@ dialect :
 
 callableOperand :: { [A.Type] -> A.CallableOperand }
 callableOperand :
-    type operand       { \ts -> Right ($2 (A.FunctionType $1 ts False)) }
+    cOperand                                                { \_  -> Right $1 }
+  | type                         operand  %prec PREC_SECOND { \ts -> Right ($2 (A.FunctionType $1 ts        False  )) }
+  | type '(' typeListVar ')' '*' operand  %prec PREC_FIRST  { \_  -> Right ($6 (A.FunctionType $1 (fst $3) (snd $3))) } 
   | type 'asm' sideeffect alignstack dialect STRING ',' STRING
                        { \ts -> Left (A.InlineAssembly (A.FunctionType $1 ts False) $6 $8 $3 $4 $5) }
 
