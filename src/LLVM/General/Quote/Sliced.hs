@@ -14,6 +14,8 @@ module LLVM.General.Quote.Sliced (
     labelUnlabeled,
     -- * Inspection
     entireBlocks,
+    isUnlabeled,
+    isUnterminated,
     startLabel
 ) where
 
@@ -119,6 +121,17 @@ labelUnlabeled name s =
 -- | 'entireBlocks . blocks == id'
 entireBlocks :: Sliced -> [L.BasicBlock]
 entireBlocks (Slice _ _ bs _) = bs
+
+-- | `True` when the slice has unlabeled instructions or a terminator that will be discarded 
+-- | if the preceding slices don't start the block.
+isUnlabeled :: Sliced -> Bool
+isUnlabeled (Slice [] Nothing _ _) = False
+isUnlabeled (Slice _  _       _ _) = True
+
+-- | `True` when the slice has a label that starts an unterminated block.
+isUnterminated :: Sliced -> Bool
+isUnterminated (Slice _ _ _ Nothing) = False
+isUnterminated (Slice _ _ _ _      ) = True
 
 -- | Gets the label that precedes everything else in the slice, if it exists.
 startLabel :: Sliced -> Maybe L.Name

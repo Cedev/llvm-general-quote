@@ -236,6 +236,8 @@ instance QQExp A.Instruction L.Instruction where
                     case x1' :: Either L.Instruction L.Terminator of
                       Left  x1'' -> return x1''
                       Right x1'' -> fail $ show x1'' ++ " is no Instruction"||]
+instance QQExp [A.LabeledInstruction] [L.BasicBlock] where
+  qqExpM = qqLabeledInstructionListBasicBlocksE
 instance QQExp [A.LabeledInstruction] Sliced.Sliced where
   qqExpM = qqLabeledInstructionListE
 instance QQExp A.LabeledInstruction Sliced.Sliced where
@@ -301,7 +303,7 @@ qqGlobalE (A.Function x1 x2 x3 x4 x5 x6 x7 x8 x9 xA xB xC) =
   [||L.Function <$> $$(qqExpM x1) <*> $$(qqExpM x2) <*> $$(qqExpM x3) <*> $$(qqExpM x4)
                 <*> $$(qqExpM x5) <*> $$(qqExpM x6) <*> $$(qqExpM x7) <*> $$(qqExpM x8)
                 <*> $$(qqExpM x9) <*> $$(qqExpM xA) <*> $$(qqExpM xB)
-                <*> fmap (toSSA . Sliced.entireBlocks) $$(qqExpM xC)||]
+                <*> toSSA `fmap` $$(qqExpM xC)||]
 
 qqParameterListE :: Conversion [A.Parameter] [L.Parameter]
 qqParameterListE [] = [||pure []||]
@@ -466,6 +468,16 @@ qqInstructionE (A.Resume x1 x2) =
   [||Right <$> (L.Resume <$> $$(qqExpM x1) <*> $$(qqExpM x2))||]
 qqInstructionE (A.Unreachable x1) =
   [||Right <$> (L.Unreachable <$> $$(qqExpM x1))||]
+
+qqLabeledInstructionListBasicBlocksE :: Conversion [A.LabeledInstruction] [L.BasicBlock]
+qqLabeledInstructionListBasicBlocksE xs =
+  [||do
+        slice <- $$(qqExpM xs)
+        if Sliced.isUnlabeled slice
+        then do
+            name <- $$(qqMakeName)
+            return . Sliced.entireBlocks $ Sliced.label name <> slice
+        else return . Sliced.entireBlocks $ slice||]        
 
 qqLabeledInstructionListE :: Conversion [A.LabeledInstruction] Sliced.Sliced
 qqLabeledInstructionListE [] =
@@ -635,11 +647,14 @@ qqNameE (A.Name x1) =
   [||L.Name <$> $$(qqExpM x1)||]
 qqNameE (A.UnName x1) =
   [||L.UnName <$> $$(qqExpM x1)||]
-qqNameE A.NeedsName = do
-  n <- runIO $ atomicModifyIORef' counter $ \n -> (n+1,n)
-  [||pure $ L.Name $ "n" ++ show (n :: Int)||]
+qqNameE A.NeedsName = qqMakeName    
 qqNameE (A.AntiName s) =
   unsafeTExpCoerce [|$(antiVarE s) >>= return . toName|]
+
+qqMakeName :: Applicative m => Q (TExp (m L.Name))
+qqMakeName = do
+  n <- runIO $ atomicModifyIORef' counter $ \n -> (n+1,n)
+  [|| pure $ L.Name $ "n" ++ show (n :: Int) ||]
 
 qqTypeE :: Conversion A.Type L.Type
 qqTypeE A.VoidType =
